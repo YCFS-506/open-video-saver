@@ -5,6 +5,12 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class LinksParserTest {
+    @Test public void groupedAdtsAudioIsSplitIntoRawAacFrames() throws Exception {
+        byte[] data={(byte)255,(byte)241,76,(byte)128,1,63,(byte)252,11,22,(byte)255,(byte)241,76,(byte)128,1,63,(byte)252,33,44};
+        java.util.List<Adts.Frame> frames=Adts.split(java.nio.ByteBuffer.wrap(data),data.length);
+        assertEquals(2,frames.size());assertEquals(7,frames.get(0).offset);assertEquals(2,frames.get(0).length);assertEquals(48000,frames.get(0).rate);assertEquals(16,frames.get(1).offset);
+        try{Adts.split(java.nio.ByteBuffer.wrap(data),data.length-1);fail();}catch(java.io.IOException expected){}
+    }
     @Test public void kuaishouFirstRangeOnIndependentSegmentsIsPreserved() throws Exception {
         String playlist="#EXTM3U\n#EXT-X-BYTERANGE:100@0\nfirst.ts\nsecond.ts\n#EXT-X-ENDLIST\n";
         assertEquals(2,Hls.segments(playlist,"https://v1.kwaicdn.com/path/video.m3u8",true).size());

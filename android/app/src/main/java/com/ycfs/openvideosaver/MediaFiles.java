@@ -111,7 +111,9 @@ final class MediaFiles {
                     if(!isVideo&&!isAudio)continue;
                     if(audio!=null&&((file.equals(prepared)&&!isVideo)||(file.equals(audio)&&!isAudio)))continue;
                     if(isVideo&&videoTracks>0||isAudio&&audioTracks>0)continue;
-                    extractor.selectTrack(i);tracks.add(new Track(extractor,i,muxer.addTrack(f),isVideo));
+                    boolean adts=isAudio&&"audio/mp4a-latm".equals(mime)&&((!prepared.equals(video)&&file.equals(prepared))||(f.containsKey(MediaFormat.KEY_IS_ADTS)&&f.getInteger(MediaFormat.KEY_IS_ADTS)!=0));
+                    if(adts)f.setInteger(MediaFormat.KEY_IS_ADTS,0);
+                    extractor.selectTrack(i);tracks.add(new Track(extractor,i,muxer.addTrack(f),adts));
                     if(isVideo) {
                         videoTracks++;if(f.containsKey("rotation-degrees"))muxer.setOrientationHint(f.getInteger("rotation-degrees"));
                     } else audioTracks++;
@@ -131,8 +133,16 @@ final class MediaFiles {
                     for(Track candidate:tracks)if(candidate.extractor==extractor&&candidate.source==index){track=candidate;break;}
                     if(track!=null) {
                         if((extractor.getSampleFlags()&MediaExtractor.SAMPLE_FLAG_ENCRYPTED)!=0)throw new IOException("不能保存加密媒体");
-                        info.set(0,size,Math.max(0,extractor.getSampleTime()-origin),(extractor.getSampleFlags()&MediaExtractor.SAMPLE_FLAG_SYNC)!=0?MediaCodec.BUFFER_FLAG_KEY_FRAME:0);
-                        muxer.writeSampleData(track.target,buffer,info);seen.add(index);
+                        long time=Math.max(0,extractor.getSampleTime()-origin);
+                        if(track.adts) {
+                            long elapsed=0;for(Adts.Frame frame:Adts.split(buffer,size)) {
+                                info.set(frame.offset,frame.length,time+elapsed,MediaCodec.BUFFER_FLAG_KEY_FRAME);
+                                muxer.writeSampleData(track.target,buffer,info);elapsed+=1024L*1000000/frame.rate;
+                            }
+                        }else {
+                            info.set(0,size,time,(extractor.getSampleFlags()&MediaExtractor.SAMPLE_FLAG_SYNC)!=0?MediaCodec.BUFFER_FLAG_KEY_FRAME:0);
+                            muxer.writeSampleData(track.target,buffer,info);
+                        }seen.add(index);
                     }
                     extractor.advance();
                 }
@@ -146,8 +156,8 @@ final class MediaFiles {
         }
     }
     private static final class Track {
-        final MediaExtractor extractor;final int source,target;final boolean video;
-        Track(MediaExtractor e,int source,int target,boolean video){extractor=e;this.source=source;this.target=target;this.video=video;}
+        final MediaExtractor extractor;final int source,target;final boolean adts;
+        Track(MediaExtractor e,int source,int target,boolean adts){extractor=e;this.source=source;this.target=target;this.adts=adts;}
     }
     private Uri publish(File file,String name,String mime,String type,String folder) throws IOException {
         Net.interrupted();

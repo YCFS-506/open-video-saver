@@ -58,7 +58,7 @@ final class MediaFiles {
             } else {
                 if(format==null)throw new IOException("请先选择画质");
                 File video=new File(directory,"video.source"),output=new File(directory,"result.mp4");
-                if(format.hls)hls(format.url,work.referer,video,progress,0);
+                if(format.hls)hls(format.url,work.referer,video,progress,0,work.platform.equals("kuaishou"));
                 else Net.download(format.url,work.referer,video,progress,"下载视频");
                 File audio=null;
                 if(!format.audioUrl.isEmpty()) {
@@ -79,26 +79,15 @@ final class MediaFiles {
             throw error;
         }finally{clean(directory);}
     }
-    private void hls(String address,String referer,File target,Net.Progress progress,int depth) throws Exception {
+    private void hls(String address,String referer,File target,Net.Progress progress,int depth,boolean kuaishou) throws Exception {
         if(depth>3||!Links.media(address))throw new IOException("HLS 播放列表不受支持");
         String list=Net.read(address,referer,Net.DESKTOP).text();
         if(!list.startsWith("#EXTM3U"))throw new IOException("不是有效的 HLS 播放列表");
         String[] lines=list.split("\\r?\\n");
         for(int i=0;i<lines.length;i++)if(lines[i].startsWith("#EXT-X-STREAM-INF")&&i+1<lines.length) {
-            hls(URI.create(address).resolve(lines[i+1].trim()).toString(),referer,target,progress,depth+1);return;
+            hls(URI.create(address).resolve(lines[i+1].trim()).toString(),referer,target,progress,depth+1,kuaishou);return;
         }
-        if(!list.contains("#EXT-X-ENDLIST"))throw new IOException("暂不保存直播 HLS");
-        List<String> segments=new ArrayList<>();
-        for(String raw:lines) {
-            String line=raw.trim();
-            if(line.startsWith("#EXT-X-KEY")&&!line.contains("METHOD=NONE"))throw new IOException("不支持加密 HLS");
-            if(line.startsWith("#EXT-X-BYTERANGE"))throw new IOException("暂不支持使用字节范围的 HLS");
-            if(line.startsWith("#EXT-X-MAP")) {
-                String path=Links.id(line,"URI=\"([^\"]+)\"");if(path.isEmpty()||line.contains("BYTERANGE"))throw new IOException("HLS 初始化段不可用");
-                segments.add(URI.create(address).resolve(path).toString());
-            }else if(!line.isEmpty()&&!line.startsWith("#"))segments.add(URI.create(address).resolve(line).toString());
-        }
-        if(segments.isEmpty())throw new IOException("没有可保存的 HLS 分段");
+        List<String> segments=Hls.segments(list,address,kuaishou);
         File part=new File(target.getParentFile(),"segment.tmp");
         try(FileOutputStream stream=new FileOutputStream(target)) {
             for(int i=0;i<segments.size();i++) {
@@ -128,6 +117,8 @@ final class MediaFiles {
                 }
             }
             if(videoTracks==0||(audio!=null&&audioTracks==0))throw new IOException("系统无法读取此媒体格式，请尝试通用格式（H.264）");
+            long origin=Long.MAX_VALUE;for(MediaExtractor extractor:extractors)if(extractor.getSampleTime()>=0)origin=Math.min(origin,extractor.getSampleTime());
+            if(origin==Long.MAX_VALUE)origin=0;
             muxer.start();started=true;ByteBuffer buffer=ByteBuffer.allocateDirect(8*1024*1024);
             MediaCodec.BufferInfo info=new MediaCodec.BufferInfo();
             for(MediaExtractor extractor:extractors) {
@@ -139,7 +130,7 @@ final class MediaFiles {
                     for(Track candidate:tracks)if(candidate.extractor==extractor&&candidate.source==index){track=candidate;break;}
                     if(track!=null) {
                         if((extractor.getSampleFlags()&MediaExtractor.SAMPLE_FLAG_ENCRYPTED)!=0)throw new IOException("不能保存加密媒体");
-                        info.set(0,size,extractor.getSampleTime(),(extractor.getSampleFlags()&MediaExtractor.SAMPLE_FLAG_SYNC)!=0?MediaCodec.BUFFER_FLAG_KEY_FRAME:0);
+                        info.set(0,size,Math.max(0,extractor.getSampleTime()-origin),(extractor.getSampleFlags()&MediaExtractor.SAMPLE_FLAG_SYNC)!=0?MediaCodec.BUFFER_FLAG_KEY_FRAME:0);
                         muxer.writeSampleData(track.target,buffer,info);seen.add(index);
                     }
                     extractor.advance();

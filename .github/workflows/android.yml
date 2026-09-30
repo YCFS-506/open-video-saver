@@ -52,11 +52,12 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Generate original media test fixtures
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg
+          sudo apt-get update -qq -o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
+          sudo apt-get install -y ffmpeg -o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15
           mkdir -p android/app/src/androidTest/assets
           ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=160x90:rate=30 -t 1 -c:v libx264 -pix_fmt yuv420p android/app/src/androidTest/assets/video.mp4
           ffmpeg -hide_banner -loglevel error -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:a aac android/app/src/androidTest/assets/audio.m4a
+          ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=160x90:rate=30 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:v libx264 -c:a aac -pix_fmt yuv420p -f mpegts android/app/src/androidTest/assets/sample.ts
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}

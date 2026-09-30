@@ -61,6 +61,7 @@ cd android
 New-Item -ItemType Directory -Force app/src/androidTest/assets
 ffmpeg -f lavfi -i testsrc2=size=160x90:rate=30 -t 1 -c:v libx264 -pix_fmt yuv420p app/src/androidTest/assets/video.mp4
 ffmpeg -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:a aac app/src/androidTest/assets/audio.m4a
+ffmpeg -f lavfi -i testsrc2=size=160x90:rate=30 -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:v libx264 -c:a aac -pix_fmt yuv420p -f mpegts app/src/androidTest/assets/sample.ts
 .\gradlew.bat connectedDebugAndroidTest
 ```
 

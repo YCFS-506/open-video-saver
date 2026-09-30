@@ -5,6 +5,12 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class LinksParserTest {
+    @Test public void kuaishouFirstRangeOnIndependentSegmentsIsPreserved() throws Exception {
+        String playlist="#EXTM3U\n#EXT-X-BYTERANGE:100@0\nfirst.ts\nsecond.ts\n#EXT-X-ENDLIST\n";
+        assertEquals(2,Hls.segments(playlist,"https://v1.kwaicdn.com/path/video.m3u8",true).size());
+        try{Hls.segments(playlist,"https://v1.kwaicdn.com/path/video.m3u8",false);fail();}catch(java.io.IOException expected){}
+        try{Hls.segments("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128\nfirst.ts\n#EXT-X-ENDLIST","https://v1.kwaicdn.com/path/video.m3u8",true);fail();}catch(java.io.IOException expected){}
+    }
     @Test public void frameRateHandlesRationalSourceValueWithoutInventingMissingRate() {
         assertEquals(29.97,Parsers.frameRate("30000/1001"),0.001);
         assertEquals(60,Parsers.frameRate("60"),0);assertEquals(0,Parsers.frameRate("0/0"),0);assertEquals(0,Parsers.frameRate(""),0);

@@ -21,6 +21,19 @@ import java.util.*;
 import static org.junit.Assert.*;
 
 public class DeviceSmokeTest {
+    @Test public void transportStreamRemuxKeepsAudioAndNormalizesStartTime() throws Exception {
+        Instrumentation instrument=InstrumentationRegistry.getInstrumentation();MediaFiles files=new MediaFiles(instrument.getTargetContext());File cache=files.cache();
+        try {
+            File source=fixture(instrument,"sample.ts",cache),output=new File(cache,"transport.mp4");MediaFiles.mux(source,null,output);
+            MediaExtractor extractor=new MediaExtractor();
+            try {
+                extractor.setDataSource(output.getPath());assertEquals(2,extractor.getTrackCount());int video=-1;
+                for(int i=0;i<extractor.getTrackCount();i++)if(extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME).startsWith("video/"))video=i;
+                assertTrue(video>=0);extractor.selectTrack(video);assertTrue(extractor.getSampleTime()<100000);int count=0;ByteBuffer b=ByteBuffer.allocate(1024*1024);
+                while(extractor.readSampleData(b,0)>=0){count++;extractor.advance();b.clear();}assertEquals(30,count);
+            }finally{extractor.release();}
+        }finally{MediaFiles.clean(cache);}
+    }
     @Test public void shareTextOpensScreenWithDownloadDisabledBeforeReading() {
         Instrumentation instrument=InstrumentationRegistry.getInstrumentation();Context context=instrument.getTargetContext();
         Intent intent=new Intent(context,MainActivity.class).setAction(Intent.ACTION_SEND).setType("text/plain")

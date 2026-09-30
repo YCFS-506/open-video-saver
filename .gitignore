@@ -36,3 +36,8 @@ cookie*.json
 *storage_state*.json
 *browser_profile*/
 KuaishouBrowserDirect/
+android/.gradle/
+android/local.properties
+android/**/build/
+*.jks
+*.keystore

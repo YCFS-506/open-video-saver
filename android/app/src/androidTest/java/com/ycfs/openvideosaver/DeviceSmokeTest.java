@@ -24,15 +24,26 @@ public class DeviceSmokeTest {
     @Test public void transportStreamRemuxKeepsAudioAndNormalizesStartTime() throws Exception {
         Instrumentation instrument=InstrumentationRegistry.getInstrumentation();MediaFiles files=new MediaFiles(instrument.getTargetContext());File cache=files.cache();
         try {
-            File source=fixture(instrument,"sample.ts",cache),output=new File(cache,"transport.mp4");MediaFiles.mux(source,null,output);
+            File source=fixture(instrument,"sample.ts",cache),output=new File(cache,"transport.mp4");
+            File drained=TsTail.prepare(source);int preparedFrames=sampleCount(drained,"video/");
+            MediaFiles.mux(source,null,output);
             MediaExtractor extractor=new MediaExtractor();
             try {
                 extractor.setDataSource(output.getPath());assertEquals(2,extractor.getTrackCount());int video=-1;
                 for(int i=0;i<extractor.getTrackCount();i++)if(extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME).startsWith("video/"))video=i;
                 assertTrue(video>=0);extractor.selectTrack(video);assertTrue(extractor.getSampleTime()<100000);int count=0;ByteBuffer b=ByteBuffer.allocate(1024*1024);
-                while(extractor.readSampleData(b,0)>=0){count++;extractor.advance();b.clear();}assertEquals(30,count);
+                while(extractor.readSampleData(b,0)>=0){count++;extractor.advance();b.clear();}assertEquals("native prepared TS frames="+preparedFrames,30,count);
             }finally{extractor.release();}
+            assertEquals("preserve generated AAC samples",48,sampleCount(output,"audio/"));
         }finally{MediaFiles.clean(cache);}
+    }
+    private static int sampleCount(File file,String prefix) throws Exception {
+        MediaExtractor extractor=new MediaExtractor();
+        try{extractor.setDataSource(file.getPath());int index=-1;
+            for(int i=0;i<extractor.getTrackCount();i++)if(extractor.getTrackFormat(i).getString(MediaFormat.KEY_MIME).startsWith(prefix))index=i;
+            assertTrue(index>=0);extractor.selectTrack(index);int count=0;ByteBuffer b=ByteBuffer.allocate(1024*1024);
+            while(extractor.readSampleData(b,0)>=0){count++;extractor.advance();b.clear();}return count;
+        }finally{extractor.release();}
     }
     @Test public void shareTextOpensScreenWithDownloadDisabledBeforeReading() {
         Instrumentation instrument=InstrumentationRegistry.getInstrumentation();Context context=instrument.getTargetContext();

@@ -55,20 +55,38 @@ final class Net {
     }
     static String download(String address, String referer, File target, Progress progress, String phase) throws IOException {
         if (!Links.media(address)) throw new IOException("返回的媒体地址不属于支持的平台");
-        HttpURLConnection connection=open(address,referer,DESKTOP);
-        try {
-            int code=connection.getResponseCode();
-            if (code!=200) throw new IOException("媒体请求返回 HTTP "+code);
-            String mime=connection.getContentType(); long total=connection.getContentLengthLong(),written=0;
-            try (InputStream input=connection.getInputStream(); FileOutputStream output=new FileOutputStream(target)) {
-                byte[] buffer=new byte[131072]; int count;
-                while ((count=input.read(buffer))!=-1) {
-                    interrupted();output.write(buffer,0,count);written+=count;progress.update(phase,written,total);
-                }
+        long written=0,whole=-1;String mime="";
+        try (FileOutputStream output=new FileOutputStream(target)) {
+            while(true) {
+                interrupted();HttpURLConnection connection=open(address,referer,DESKTOP);
+                connection.setRequestProperty("Range","bytes="+written+"-");
+                try {
+                    int code=connection.getResponseCode();
+                    if(code!=200&&code!=206)throw new IOException("媒体请求返回 HTTP "+code);
+                    if(!Links.media(connection.getURL().toString()))throw new IOException("媒体跳转到了不支持的地址");
+                    if(mime.isEmpty()&&connection.getContentType()!=null)mime=connection.getContentType().split(";",2)[0].trim().toLowerCase(java.util.Locale.ROOT);
+                    long length=connection.getContentLengthLong(),start=written,expectedEnd=-1;
+                    if(code==206) {
+                        String range=connection.getHeaderField("Content-Range");
+                        java.util.regex.Matcher match=java.util.regex.Pattern.compile("bytes (\\d+)-(\\d+)/(\\d+)").matcher(range==null?"":range);
+                        if(!match.matches())throw new IOException("媒体返回不完整的分段信息");
+                        if(Long.parseLong(match.group(1))!=written)throw new IOException("媒体分段起点错误");
+                        expectedEnd=Long.parseLong(match.group(2))+1;long currentTotal=Long.parseLong(match.group(3));
+                        if(expectedEnd<=written||expectedEnd>currentTotal||(whole>0&&whole!=currentTotal))throw new IOException("媒体分段长度错误");
+                        whole=currentTotal;
+                    }else {
+                        if(written!=0)throw new IOException("服务器未支持后续媒体分段，请重新读取作品");whole=length;
+                    }
+                    try(InputStream input=connection.getInputStream()) {
+                        byte[] buffer=new byte[131072];int count;
+                        while((count=input.read(buffer))!=-1){interrupted();output.write(buffer,0,count);written+=count;progress.update(phase,written,whole);}
+                    }
+                    if((length>=0&&written-start!=length)||(expectedEnd>=0&&written!=expectedEnd))throw new IOException("媒体分段未完整下载");
+                    if(code==200||written==whole)break;
+                }finally{connection.disconnect();}
             }
-            if (written<100 || (total>0 && written!=total)) throw new IOException("媒体文件未完整下载");
-            return mime==null?"":mime.split(";",2)[0].trim().toLowerCase(java.util.Locale.ROOT);
-        } finally { connection.disconnect(); }
+        }
+        if(written<100||(whole>0&&written!=whole))throw new IOException("媒体文件未完整下载");return mime;
     }
     static void interrupted() throws InterruptedIOException {
         if (Thread.currentThread().isInterrupted()) throw new InterruptedIOException("下载已取消");

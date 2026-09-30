@@ -1,6 +1,6 @@
 # Open Video Saver
 
-**公开作品保存工具 · Windows 桌面版**
+**公开作品保存工具 · Windows 桌面版 / Android 测试版**
 
 粘贴作品链接，选择视频画质或图文图片，将公开可访问的内容保存到本地。支持抖音、哔哩哔哩、小红书和快手，提供桌面界面与命令行入口。
 
@@ -24,7 +24,30 @@
 | 小红书 | 支持 | 已实现，待更多公开图文样本验证 | 读取公开笔记数据；分享参数需要完整保留，页面可能要求登录或验证。 |
 | 快手 | 支持 MP4 / HLS | 支持图集 | 优先读取官方手机网页；失败时使用第三方公开链接解析，最后尝试专用 Edge 窗口。 |
 
-这是 **Windows 桌面项目**。当前不提供 Android APK 或 HarmonyOS HAP；移动端迁移方案见 [移动端说明](docs/mobile.md)。
+上表描述 Windows 版的支持情况。Android 版采用独立的原生界面、WebView 和系统媒体库，平台访问路径与桌面版存在差异；移动端功能与验证范围见 [移动端说明](docs/mobile.md)。
+
+## Android 测试版
+
+面向 **Android 8.0 及以上**、支持安装 APK 的鸿蒙设备，以及基于 Android 的小米 / Redmi 系统。不依赖 Google 服务，安装后无需配置 Python、Edge 或 FFmpeg。实际兼容性仍需对应设备测试；HarmonyOS NEXT 原生 HAP 不在此 APK 的目标范围内。
+
+- 下载入口：[v0.2.0-alpha.1 测试版](https://github.com/YCFS-506/open-video-saver/releases/tag/v0.2.0-alpha.1)。
+- 粘贴分享文案，或从系统分享菜单选择“公开作品保存”。
+- 点击“读取作品”，选择视频格式，或点击图片 / 复选框选择要保存的图片。
+- 点击“保存到手机”；下载进度显示在界面及通知中，可取消任务。
+- 视频进入 `Movies/OpenVideoSaver`，图片进入 `Pictures/OpenVideoSaver`，文案及来源进入 `Download/OpenVideoSaver`。
+
+测试版使用调试签名。不同构建的签名可能变化，若系统提示签名不一致，需要卸载旧测试版后安装；已保存到共享媒体库的作品请事先确认并保留。平台在线解析仍受网页变化、登录 / 验证要求及设备 WebView 版本影响。
+
+### 从源码构建 APK
+
+安装 JDK 17、Android SDK（API 35），在 `android/local.properties` 设置 `sdk.dir`，或通过 `ANDROID_HOME` 指定 SDK：
+
+```powershell
+cd android
+.\gradlew.bat testDebugUnitTest assembleDebug lintDebug
+```
+
+输出：`android/app/build/outputs/apk/debug/app-debug.apk`。仓库包含官方 Gradle Wrapper，首次构建需要下载 Gradle 和依赖；APK 本身没有第三方运行库。AndroidX Test 与 JUnit 仅用于测试，不打入应用。
 
 ## 安装与运行
 
@@ -117,6 +140,7 @@ PyInstaller 生成当前桌面系统的可执行程序；它不能把本项目�
 - 快手浏览器回退使用独立资料目录 `%LOCALAPPDATA%\OpenVideoSaver\KuaishouBrowserDirect`，由用户手动完成可能出现的验证。
 - 快手请求与专用浏览器优先直连；其他平台请求可能受到系统网络配置影响。
 - 下载文件、文案和来源信息只写入用户选择的本地目录。Git 仓库不包含下载作品、浏览器资料或账号凭据。
+- Android 版使用应用内 WebView 的独立站点数据；不读取其他浏览器 Cookie，也不使用桌面版的第三方快手解析服务。下载图片预览及媒体临时文件保存在应用缓存，最终作品写入系统共享存储。
 
 ## 常见问题
 
@@ -149,6 +173,8 @@ image_posts.py          图片预览缓存与有序保存
 scripts/build_windows.ps1  Windows 构建脚本
 tests/                  无网络回归测试
 docs/mobile.md          Android / HarmonyOS 迁移说明
+android/                原生 Android 界面、平台解析与媒体保存
+.github/workflows/      桌面检查、APK 构建及 Android 模拟器验证
 ```
 
 运行离线回归检查：

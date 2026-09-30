@@ -36,6 +36,7 @@ jobs:
     needs: apk
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         api: [29, 35]
     steps:
@@ -51,6 +52,8 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Generate original media test fixtures
         run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
           mkdir -p android/app/src/androidTest/assets
           ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc2=size=160x90:rate=30 -t 1 -c:v libx264 -pix_fmt yuv420p android/app/src/androidTest/assets/video.mp4
           ffmpeg -hide_banner -loglevel error -f lavfi -i sine=frequency=440:sample_rate=48000 -t 1 -c:a aac android/app/src/androidTest/assets/audio.m4a

@@ -160,8 +160,9 @@ public final class MainActivity extends Activity {
     private void buttons() {
         if(read==null)return;read.setEnabled(!reading&&!downloading);input.setEnabled(!reading&&!downloading);
         save.setEnabled(work!=null&&!reading&&!downloading);cancel.setVisibility(reading||downloading?View.VISIBLE:View.GONE);
-        for(CheckBox check:checks)check.setEnabled(!downloading);
+        interactive(content,!downloading);
     }
+    private void interactive(View view,boolean enabled){if(view instanceof Button||view instanceof ImageView)view.setEnabled(enabled);if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)interactive(((ViewGroup)view).getChildAt(i),enabled);}
     private TextView text(String value,int size){TextView text=new TextView(this);text.setText(value);text.setTextSize(size);text.setTextColor(Color.rgb(40,50,65));text.setPadding(0,dp(6),0,dp(6));return text;}
     private Button button(String label){Button button=new Button(this);button.setText(label);button.setAllCaps(false);return button;}
     private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}

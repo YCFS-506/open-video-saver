@@ -98,17 +98,18 @@ final class MediaFiles {
         }finally{part.delete();}
     }
     static void mux(File video,File audio,File output) throws Exception {
+        File prepared=TsTail.prepare(video);
         List<MediaExtractor> extractors=new ArrayList<>();MediaMuxer muxer=null;boolean started=false;
         List<Track> tracks=new ArrayList<>();int videoTracks=0,audioTracks=0;
         try {
             muxer=new MediaMuxer(output.getPath(),MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-            for(File file:audio==null?new File[]{video}:new File[]{video,audio}) {
+            for(File file:audio==null?new File[]{prepared}:new File[]{prepared,audio}) {
                 MediaExtractor extractor=new MediaExtractor();extractors.add(extractor);extractor.setDataSource(file.getPath());
                 for(int i=0;i<extractor.getTrackCount();i++) {
                     MediaFormat f=extractor.getTrackFormat(i);String mime=f.getString(MediaFormat.KEY_MIME);
                     boolean isVideo=mime!=null&&mime.startsWith("video/"),isAudio=mime!=null&&mime.startsWith("audio/");
                     if(!isVideo&&!isAudio)continue;
-                    if(audio!=null&&((file.equals(video)&&!isVideo)||(file.equals(audio)&&!isAudio)))continue;
+                    if(audio!=null&&((file.equals(prepared)&&!isVideo)||(file.equals(audio)&&!isAudio)))continue;
                     if(isVideo&&videoTracks>0||isAudio&&audioTracks>0)continue;
                     extractor.selectTrack(i);tracks.add(new Track(extractor,i,muxer.addTrack(f),isVideo));
                     if(isVideo) {
@@ -141,6 +142,7 @@ final class MediaFiles {
         }finally {
             for(MediaExtractor extractor:extractors)extractor.release();
             if(muxer!=null){if(started)try{muxer.stop();}catch(Exception ignored){}muxer.release();}
+            if(!prepared.equals(video))prepared.delete();
         }
     }
     private static final class Track {

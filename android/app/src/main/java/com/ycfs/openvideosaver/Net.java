@@ -34,6 +34,14 @@ final class Net {
     static Response read(String url, String referer, String agent) throws IOException {
         return read(url, referer, agent, null);
     }
+    static String shareTarget(String address,String referer,String agent) throws IOException {
+        HttpURLConnection connection=open(address,referer,agent);connection.setInstanceFollowRedirects(false);
+        try {
+            int code=connection.getResponseCode();String location=connection.getHeaderField("Location");
+            if(code>=300&&code<400&&location!=null)return java.net.URI.create(address).resolve(location).toString();
+            if(code==200)return address;throw new IOException("分享链接返回 HTTP "+code);
+        }finally{connection.disconnect();}
+    }
     static Response read(String url, String referer, String agent, Map<String,String> headers) throws IOException {
         HttpURLConnection connection = open(url, referer, agent);
         try {

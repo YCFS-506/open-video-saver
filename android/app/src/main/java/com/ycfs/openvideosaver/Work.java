@@ -40,7 +40,7 @@ final class Work {
             String kind = codec.equals("H.264") ? "通用格式（H.264）" :
                     codec.equals("H.265") ? "省空间格式（H.265）" : "新格式（AV1）";
             return dimensions + motion + "\n" + kind + (hls ? " · HLS" : "") +
-                    (size > 0 ? String.format(Locale.ROOT, " · 约 %.1f MB", size/1048576.0) : "");
+                    (size > 0 ? String.format(Locale.ROOT, " · 约 %.1f MB", size/1048576.0) : "") + (label.isEmpty()?"":"\n"+label);
         }
     }
     static final class Picture {

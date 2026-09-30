@@ -5,6 +5,10 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class LinksParserTest {
+    @Test public void frameRateHandlesRationalSourceValueWithoutInventingMissingRate() {
+        assertEquals(29.97,Parsers.frameRate("30000/1001"),0.001);
+        assertEquals(60,Parsers.frameRate("60"),0);assertEquals(0,Parsers.frameRate("0/0"),0);assertEquals(0,Parsers.frameRate(""),0);
+    }
     @Test public void recognizesShareTextAndRejectsSimilarDomain() {
         assertEquals("https://v.douyin.com/8z4lDiQ1MYY/",Links.extract("0.00 #cs https://v.douyin.com/8z4lDiQ1MYY/ 复制打开"));
         assertEquals("bilibili",Links.platform("https://b23.tv/demo"));

@@ -7,6 +7,10 @@ import java.util.Iterator;
 import java.util.Set;
 
 final class Parsers {
+    static double frameRate(String value) {
+        try{String[] parts=value.split("/",2);double rate=Double.parseDouble(parts[0]);if(parts.length==2)rate/=Double.parseDouble(parts[1]);return Double.isFinite(rate)&&rate>0?rate:0;}
+        catch(NumberFormatException error){return 0;}
+    }
     static JSONObject object(JSONObject node,String key) {
         JSONObject value=node.optJSONObject(key);return value==null?new JSONObject():value;
     }

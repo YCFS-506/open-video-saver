@@ -24,7 +24,6 @@ final class Resolver {
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private Future<?> job;
     private volatile boolean done;
-    private volatile String mediaCandidate="";
     private WebView web;
     private Callback callback;
     private String source,platform,id;
@@ -33,13 +32,13 @@ final class Resolver {
     private int imageCount,stableImages;
 
     void read(String text,WebView browser,Callback callback) {
-        cancel();final int requestGeneration=generation;done=false;attempts=0;imageCount=0;stableImages=0;mediaCandidate="";this.web=browser;this.callback=callback;
+        cancel();final int requestGeneration=generation;done=false;attempts=0;imageCount=0;stableImages=0;this.web=browser;this.callback=callback;
         try{source=Links.extract(text);platform=Links.platform(source);}catch(Exception e){fail(e);return;}
         job=worker.submit(()->{
             try {
                 if(platform.equals("bilibili")) {
                     String url=source;
-                    if(Links.id(url,"(BV[0-9A-Za-z]{10})").isEmpty()&&!url.contains("/opus/")&&!url.contains("t.bilibili.com"))url=Net.read(url,"https://www.bilibili.com/",Net.DESKTOP).url;
+                    if(Links.id(url,"(BV[0-9A-Za-z]{10})").isEmpty()&&!url.contains("/opus/")&&!url.contains("t.bilibili.com"))url=Net.shareTarget(url,"https://www.bilibili.com/",Net.DESKTOP);
                     id=Links.id(url,"(BV[0-9A-Za-z]{10})");
                     if(!id.isEmpty()){finish(biliVideo(url),requestGeneration);return;}
                     String opus=Links.id(url,"/(?:opus|dynamic)/(\\d{15,20})");
@@ -59,7 +58,7 @@ final class Resolver {
                 }
                 if(platform.equals("douyin")) {
                     String url=source;id=Links.id(url,"/(?:share/)?(?:video|note|slides)/(\\d{17,19})");
-                    if(id.isEmpty()){url=Net.read(url,"https://www.douyin.com/",Net.DESKTOP).url;id=Links.id(url,"/(?:share/)?(?:video|note|slides)/(\\d{17,19})");}
+                    if(id.isEmpty()){url=Net.shareTarget(url,"https://www.douyin.com/",Net.DESKTOP);id=Links.id(url,"/(?:share/)?(?:video|note|slides)/(\\d{17,19})");}
                     if(id.isEmpty())throw new IOException("未识别到抖音作品 ID，请检查链接");
                     boolean gallery=url.contains("/note/")||url.contains("/slides/")||url.contains("schema_type=37");
                     openBrowser("https://www.douyin.com/"+(gallery?"note/":"video/")+id,requestGeneration);return;
@@ -90,7 +89,7 @@ final class Resolver {
         JSONArray videos=Parsers.array(dash,"video");
         if(!audio.isEmpty())for(int i=0;i<videos.length();i++) {
             JSONObject item=videos.getJSONObject(i);Work.Format f=new Work.Format(biliAddress(item));f.audioUrl=audio;
-            f.width=item.optInt("width");f.height=item.optInt("height");f.fps=item.optDouble("frame_rate",0);
+            f.width=item.optInt("width");f.height=item.optInt("height");f.fps=Parsers.frameRate(item.optString("frame_rate"));
             String codec=item.optString("codecs");f.codec=codec.startsWith("hev")||codec.startsWith("hvc")?"H.265":codec.startsWith("av01")?"AV1":"H.264";
             f.size=(item.optLong("bandwidth")+highest)*view.optLong("duration")/8;Parsers.format(work,f);
         }
@@ -129,12 +128,14 @@ final class Resolver {
                             return new WebResourceResponse("application/json","UTF-8",new ByteArrayInputStream(data.data));
                         }catch(Exception ignored){ }
                     }
-                    if(platform.equals("douyin")&&Links.media(uri)&&uri.contains("douyinvod.com")&&!uri.contains("media-audio"))mediaCandidate=uri;
                     return null;
                 }
                 @Override public void onPageFinished(WebView view,String url) { if(!done&&generation==requestGeneration)poll(requestGeneration); }
             });
             web.loadUrl(address);
+            if(platform.equals("douyin")&&!address.contains("/note/"))main.postDelayed(()->{
+                if(!done&&generation==requestGeneration){attempts=0;openBrowser("https://www.douyin.com/note/"+id,requestGeneration);}
+            },20000);
             main.postDelayed(()->{if(!done&&generation==requestGeneration)fail(new IOException("读取超时；请检查公开页面是否要求登录或验证，再重试"));},60000);
         });
     }
@@ -147,7 +148,7 @@ final class Resolver {
             "if(p==='douyin'){var a=Array.from(document.querySelectorAll('img[src*=\"tplv-dy-aweme-images\"]')).map(x=>x.currentSrc||x.src);"+
             "if(a.length){var st=Array.from(document.querySelectorAll('span')).find(x=>x.textContent.startsWith('发布时间：'));var r=st&&st.parentElement&&st.parentElement.parentElement;"+
             "return JSON.stringify({kind:'images',data:{images:a,caption:r&&r.firstElementChild&&r.firstElementChild.innerText||document.querySelector('meta[name=description]')?.content||''}});}"+
-            "var v=document.querySelector('video');if(v&&v.videoWidth)return JSON.stringify({kind:'fallback',data:{width:v.videoWidth,height:v.videoHeight}});}"+
+            "var v=document.querySelector('video');if(v&&v.videoWidth)return JSON.stringify({kind:'fallback',data:{url:v.currentSrc||v.src,width:v.videoWidth,height:v.videoHeight}});}"+
             "}catch(e){}return null;})()";
         web.evaluateJavascript(script,value->{
             if(done||generation!=requestGeneration)return;
@@ -164,7 +165,7 @@ final class Resolver {
                             if(work.pictures.size()==imageCount)stableImages++;else{imageCount=work.pictures.size();stableImages=0;}
                             if(stableImages<4)work=null;break;
                         case "fallback":
-                            if(!mediaCandidate.isEmpty()&&attempts>5){work=new Work("douyin",source);work.id=id;work.referer=web.getUrl();Work.Format f=new Work.Format(mediaCandidate);f.width=data.optInt("width");f.height=data.optInt("height");Parsers.format(work,f);}break;
+                            if(Links.media(data.optString("url"))&&attempts>5){work=new Work("douyin",source);work.id=id;work.referer=web.getUrl();Work.Format f=new Work.Format(data.optString("url"));f.width=data.optInt("width");f.height=data.optInt("height");Parsers.format(work,f);}break;
                     }
                     if(work!=null&&(work.isGallery()||!work.formats.isEmpty())){finish(work,requestGeneration);return;}
                 }

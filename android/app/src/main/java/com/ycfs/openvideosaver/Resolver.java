@@ -143,15 +143,25 @@ final class Resolver {
                     }
                     return null;
                 }
-                @Override public void onPageCommitVisible(WebView view,String url){beginPolling(requestGeneration,pageGeneration);}
-                @Override public void onPageFinished(WebView view,String url){beginPolling(requestGeneration,pageGeneration);}
+                @Override public void onPageCommitVisible(WebView view,String url){pageReady(url,requestGeneration,pageGeneration);}
+                @Override public void onPageFinished(WebView view,String url){pageReady(url,requestGeneration,pageGeneration);}
             });
-            callback.browserOpened();web.loadUrl(address);
+            callback.browserOpened();
+            Runnable navigate=()->{
+                if(done||generation!=requestGeneration||browserGeneration!=pageGeneration)return;
+                web.loadUrl(address);beginPolling(requestGeneration,pageGeneration);
+            };
+            if(web.getUrl()==null)navigate.run();
+            else web.evaluateJavascript("window.__ovsPreviousDocument=true",ignored->navigate.run());
             if(platform.equals("douyin")&&!address.contains("/note/"))main.postDelayed(()->{
                 if(!done&&generation==requestGeneration){attempts=0;openBrowser("https://www.douyin.com/note/"+id,requestGeneration);}
             },20000);
             main.postDelayed(()->{if(!done&&generation==requestGeneration)fail(new IOException("读取超时；请检查公开页面是否要求登录或验证，再重试"));},60000);
         });
+    }
+    private void pageReady(String url,int requestGeneration,int pageGeneration) {
+        if(done||generation!=requestGeneration||browserGeneration!=pageGeneration)return;
+        documentAddress=url;beginPolling(requestGeneration,pageGeneration);
     }
     private void beginPolling(int requestGeneration,int pageGeneration) {
         if(done||generation!=requestGeneration||browserGeneration!=pageGeneration||pollingStarted)return;
@@ -160,7 +170,7 @@ final class Resolver {
     private void poll(int requestGeneration,int pageGeneration) {
         if(done||generation!=requestGeneration||browserGeneration!=pageGeneration)return;
         // Navigation may start while the old DOM is still alive. Only read the current document.
-        String script="(function(){try{if(location.href!==new URL("+JSONObject.quote(documentAddress)+").href)return null;var s=window.__INITIAL_STATE__,p="+JSONObject.quote(platform)+";"+
+        String script="(function(){try{if(window.__ovsPreviousDocument||location.href!==new URL("+JSONObject.quote(documentAddress)+").href)return null;var s=window.__INITIAL_STATE__,p="+JSONObject.quote(platform)+";"+
             "if(p==='xiaohongshu'&&s&&s.note){var m=s.note.noteDetailMap||{};for(var k in m)if(m[k].note)return JSON.stringify({kind:'xhs',id:k,data:m[k].note});}"+
             "if(p==='bilibili'&&s&&s.detail)return JSON.stringify({kind:'opus',data:s.detail});"+
             "if(p==='kuaishou'&&window.INIT_STATE)return JSON.stringify({kind:'ks',data:window.INIT_STATE});"+

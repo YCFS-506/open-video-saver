@@ -127,17 +127,18 @@ public class DeviceSmokeTest {
         MainActivity activity=(MainActivity)instrument.startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         CountDownLatch imageRelease=new CountDownLatch(1),imageRequested=new CountDownLatch(1),ready=new CountDownLatch(1);
         AtomicReference<Work> result=new AtomicReference<>();AtomicReference<String> error=new AtomicReference<>();
+        java.util.List<String> events=new java.util.concurrent.CopyOnWriteArrayList<>();AtomicReference<String> snapshot=new AtomicReference<>("");
         AtomicReference<WebView> browser=new AtomicReference<>();Resolver resolver=new Resolver();
         Bitmap png=Bitmap.createBitmap(12,12,Bitmap.Config.ARGB_8888);ByteArrayOutputStream bytes=new ByteArrayOutputStream();png.compress(Bitmap.CompressFormat.PNG,100,bytes);png.recycle();byte[] picture=bytes.toByteArray();
         String html="<html><body><div style='height:300px'>已加载的作品</div><script>window.__INITIAL_STATE__={note:{noteDetailMap:{test:{note:{type:'normal',title:'标题',desc:'完整正文',imageList:[{urlDefault:'https://sns-webpic-qc.xhscdn.com/original.jpg'}]}}}}};</script><img width='12' height='12' src='https://www.xiaohongshu.com/fixture-slow.png'></body></html>";
         try {
             instrument.runOnMainSync(()->{
                 WebView web=new WebView(activity) {
-                    @Override public void loadUrl(String url){loadDataWithBaseURL(url,html,"text/html","UTF-8",null);}
+                    @Override public void loadUrl(String url){loadDataWithBaseURL(url,html,"text/html","UTF-8",url);}
                     @Override public void setWebViewClient(WebViewClient client){super.setWebViewClient(new WebViewClient(){
-                        @Override public void onPageStarted(WebView view,String url,Bitmap favicon){client.onPageStarted(view,url,favicon);}
-                        @Override public void onPageCommitVisible(WebView view,String url){client.onPageCommitVisible(view,url);}
-                        @Override public void onPageFinished(WebView view,String url){client.onPageFinished(view,url);}
+                        @Override public void onPageStarted(WebView view,String url,Bitmap favicon){events.add("start:"+url);client.onPageStarted(view,url,favicon);}
+                        @Override public void onPageCommitVisible(WebView view,String url){events.add("commit:"+url);client.onPageCommitVisible(view,url);}
+                        @Override public void onPageFinished(WebView view,String url){events.add("finish:"+url);client.onPageFinished(view,url);}
                         @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request){
                             if("/fixture-slow.png".equals(request.getUrl().getPath())) {
                                 imageRequested.countDown();return new WebResourceResponse("image/png",null,new InputStream(){
@@ -158,7 +159,9 @@ public class DeviceSmokeTest {
                 });
             });
             assertTrue("controlled page must request its delayed image",imageRequested.await(8,TimeUnit.SECONDS));
-            assertTrue("read data before the slow resource finishes",ready.await(8,TimeUnit.SECONDS));assertNull(error.get());assertNotNull(result.get());
+            boolean early=ready.await(8,TimeUnit.SECONDS);
+            if(!early){CountDownLatch inspected=new CountDownLatch(1);instrument.runOnMainSync(()->browser.get().evaluateJavascript("JSON.stringify({href:location.href,state:!!window.__INITIAL_STATE__,old:!!window.__ovsPreviousDocument})",value->{snapshot.set(value);inspected.countDown();}));inspected.await(2,TimeUnit.SECONDS);}
+            assertTrue("read before slow resource finishes; events="+events+" snapshot="+snapshot.get(),early);assertNull(error.get());assertNotNull(result.get());
             assertEquals("标题\n\n完整正文",result.get().caption);assertEquals(1,result.get().pictures.size());assertEquals("slow resource is still blocked",1,imageRelease.getCount());
         }finally {
             imageRelease.countDown();instrument.runOnMainSync(()->{resolver.destroy();if(browser.get()!=null){((ViewGroup)browser.get().getParent()).removeView(browser.get());browser.get().destroy();}activity.finish();});

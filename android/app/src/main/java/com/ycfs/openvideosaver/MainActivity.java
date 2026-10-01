@@ -2,6 +2,7 @@ package com.ycfs.openvideosaver;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
@@ -21,23 +22,37 @@ public final class MainActivity extends Activity {
     private final Resolver resolver=new Resolver();
     private final ExecutorService previews=Executors.newSingleThreadExecutor();
     private final Handler main=new Handler(Looper.getMainLooper());
-    private EditText input;private TextView status,count;
-    private Button read,save,cancel;private LinearLayout content,browserPanel;
+    private EditText input;private TextView status,count,receipt;
+    private Button read,save,cancel,browserToggle;private LinearLayout content,browserPanel;
+    private FrameLayout browserEngine;
+    private AlertDialog completionDialog,repeatDialog;
+    private boolean browserExpanded,awaitingPermission,repeatApproved;
     private WebView browser;private ProgressBar progress;
     private Work work;private int selectedFormat;private boolean reading,downloading;
     private File previewDirectory;private Future<?> previewTask;
     private final List<CheckBox> checks=new ArrayList<>();
-    private final DownloadService.Observer observer=value->{
-        downloading=value.busy;if(!value.message.isEmpty())status.setText(value.message);
+    private final DownloadService.Observer observer=this::onDownloadState;
+    void onDownloadState(DownloadService.State value) {
+        downloading=value.busy;if(reading&&!value.busy)return;
+        if(!value.message.isEmpty())status.setText(value.message);
         progress.setIndeterminate(value.percent<0);if(value.percent>=0)progress.setProgress(value.percent);
         progress.setVisibility(value.busy?View.VISIBLE:View.GONE);buttons();
-    };
+        if(value.saved!=null&&value.completion>getPreferences(0).getLong("shownCompletion",0)&&!isFinishing()&&!isDestroyed()) {
+            getPreferences(0).edit().putLong("shownCompletion",value.completion).apply();
+            receipt.setText("保存成功\n"+value.message);receipt.setVisibility(View.VISIBLE);
+            completionDialog=new AlertDialog.Builder(this).setTitle("保存成功").setMessage(value.message)
+                    .setPositiveButton("知道了",(dialog,which)->{}).create();completionDialog.show();
+        }
+    }
     @Override public void onCreate(Bundle bundle) {
         super.onCreate(bundle);
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(245,247,250));
         root.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(dp(16),insets.getSystemWindowInsetTop()+dp(12),dp(16),insets.getSystemWindowInsetBottom()+dp(12));return insets;});
         ScrollView scroll=new ScrollView(this);LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);
-        scroll.setFillViewport(true);scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,-1));setContentView(root);
+        scroll.setFillViewport(true);scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,-1));
+        // Keep a real viewport for site scripts and lazy loading while the opaque native screen covers it.
+        FrameLayout layers=new FrameLayout(this);browserEngine=new FrameLayout(this);
+        layers.addView(browserEngine,new FrameLayout.LayoutParams(-1,-1));layers.addView(root,new FrameLayout.LayoutParams(-1,-1));setContentView(layers);
         TextView title=text("公开作品保存",26);title.setTextColor(Color.rgb(20,65,110));body.addView(title);
         TextView subtitle=text("抖音 · 哔哩哔哩 · 小红书 · 快手",14);body.addView(subtitle);
         body.addView(text("粘贴分享链接或整段文案，也可以从其他应用分享至这里。",14));
@@ -48,10 +63,13 @@ public final class MainActivity extends Activity {
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(100);progress.setVisibility(View.GONE);body.addView(progress,new LinearLayout.LayoutParams(-1,dp(12)));
         content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);body.addView(content);
         save=button("保存到手机");save.setEnabled(false);body.addView(save);save.setOnClickListener(v->save());
+        receipt=text("",14);receipt.setTextColor(Color.rgb(20,110,60));receipt.setVisibility(View.GONE);body.addView(receipt);
         cancel=button("取消任务");cancel.setVisibility(View.GONE);body.addView(cancel);cancel.setOnClickListener(v->cancel());
+        browserToggle=button("需要登录或验证？查看网页");browserToggle.setVisibility(View.GONE);body.addView(browserToggle);
+        browserToggle.setOnClickListener(v->setBrowserExpanded(!browserExpanded));
         browserPanel=new LinearLayout(this);browserPanel.setOrientation(LinearLayout.VERTICAL);browserPanel.setVisibility(View.GONE);
         browserPanel.addView(text("正在读取公开页面。如出现验证，可在下面手动完成。",13));
-        browser=new WebView(this);browserPanel.addView(browser,new LinearLayout.LayoutParams(-1,dp(330)));body.addView(browserPanel);
+        browser=new WebView(this);body.addView(browserPanel);setBrowserExpanded(false);
         body.addView(text("视频：Movies/OpenVideoSaver\n图片：Pictures/OpenVideoSaver\n文案与来源：Download/OpenVideoSaver\n预览缩小显示；保存保留下载到的图片文件，不重压缩。",12));
         if(bundle!=null)input.setText(bundle.getString("text",""));else receive(getIntent());
     }
@@ -65,15 +83,16 @@ public final class MainActivity extends Activity {
         if(reading||downloading)return;
         reading=true;work=null;selectedFormat=0;content.removeAllViews();checks.clear();MediaFiles.clean(previewDirectory);previewDirectory=null;
         status.setText("正在识别平台并读取公开作品…");progress.setIndeterminate(true);progress.setVisibility(View.VISIBLE);
-        browserPanel.setVisibility(View.VISIBLE);buttons();
+        receipt.setVisibility(View.GONE);setBrowserExpanded(false);browserToggle.setVisibility(View.GONE);buttons();
         resolver.read(input.getText().toString(),browser,new Resolver.Callback(){
             @Override public void ready(Work result) {
-                work=result;browserPanel.setVisibility(View.GONE);
+                work=result;setBrowserExpanded(false);browserToggle.setVisibility(View.GONE);
                 if(result.isGallery())loadPictures(result);else {
                     reading=false;progress.setVisibility(View.GONE);status.setText(result.platformName()+" · "+result.formats.size()+" 种可用画质");showVideo();buttons();
                 }
             }
             @Override public void error(String message){reading=false;progress.setVisibility(View.GONE);status.setText(message);buttons();}
+            @Override public void browserOpened(){browserToggle.setVisibility(View.VISIBLE);}
         });
     }
     private void showVideo() {
@@ -131,23 +150,35 @@ public final class MainActivity extends Activity {
     }
     private void updateCount(){if(work==null)return;int n=0;for(Work.Picture picture:work.pictures)if(picture.selected)n++;count.setText("已选 "+n+" / "+work.pictures.size()+" 张");}
     private void save() {
-        if(reading||downloading||work==null)return;
+        if(reading||downloading||awaitingPermission||work==null||(repeatDialog!=null&&repeatDialog.isShowing()))return;
         if(work.isGallery()){int n=0;for(Work.Picture p:work.pictures)if(p.selected)n++;if(n==0){status.setText("请至少选择一张图片");return;}}
+        repeatApproved=false;
+        if(SavedWorks.contains(this,work)) {
+            repeatDialog=new AlertDialog.Builder(this).setTitle("这条作品已保存过")
+                    .setMessage("再次保存会在手机中新增一份文件。确定再次保存当前选择的内容吗？")
+                    .setNegativeButton("取消",(dialog,which)->{})
+                    .setPositiveButton("仍要保存",(dialog,which)->{repeatApproved=true;requestSave();}).create();repeatDialog.show();return;
+        }
+        requestSave();
+    }
+    private void requestSave() {
         if(Build.VERSION.SDK_INT<=28&&checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)!=PackageManager.PERMISSION_GRANTED) {
+            awaitingPermission=true;buttons();
             requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},1);return;
         }
         if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED&&!getPreferences(0).getBoolean("notificationAsked",false)) {
-            getPreferences(0).edit().putBoolean("notificationAsked",true).apply();requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},2);return;
+            awaitingPermission=true;buttons();getPreferences(0).edit().putBoolean("notificationAsked",true).apply();requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},2);return;
         }
         startSaving();
     }
     private void startSaving() {
         Work.Format format=work.isGallery()?null:work.formats.get(selectedFormat);
-        if(DownloadService.enqueue(this,work,format)){downloading=true;status.setText("准备保存…");progress.setIndeterminate(true);progress.setVisibility(View.VISIBLE);buttons();}
+        if(DownloadService.enqueue(this,work,format,repeatApproved)){downloading=true;receipt.setVisibility(View.GONE);status.setText("准备保存…");progress.setIndeterminate(true);progress.setVisibility(View.VISIBLE);buttons();}
         else status.setText("有任务正在保存，或系统未允许启动下载服务，请稍后重试。");
     }
     @Override public void onRequestPermissionsResult(int code,String[] permissions,int[] results) {
         super.onRequestPermissionsResult(code,permissions,results);
+        awaitingPermission=false;buttons();
         if(work==null||downloading||reading)return;
         if(code==1&&(results.length==0||results[0]!=PackageManager.PERMISSION_GRANTED)){status.setText("需要存储权限才能在此系统保存文件");return;}
         if(code==1||code==2)startSaving();
@@ -155,12 +186,25 @@ public final class MainActivity extends Activity {
     private void cancel() {
         if(downloading){startService(new Intent(this,DownloadService.class).setAction(DownloadService.CANCEL));return;}
         resolver.cancel();browser.stopLoading();if(previewTask!=null)previewTask.cancel(true);
-        reading=false;work=null;browserPanel.setVisibility(View.GONE);progress.setVisibility(View.GONE);status.setText("已取消读取");buttons();
+        reading=false;work=null;setBrowserExpanded(false);browserToggle.setVisibility(View.GONE);progress.setVisibility(View.GONE);status.setText("已取消读取");buttons();
     }
     private void buttons() {
-        if(read==null)return;read.setEnabled(!reading&&!downloading);input.setEnabled(!reading&&!downloading);
-        save.setEnabled(work!=null&&!reading&&!downloading);cancel.setVisibility(reading||downloading?View.VISIBLE:View.GONE);
+        if(read==null)return;read.setEnabled(!reading&&!downloading&&!awaitingPermission);input.setEnabled(!reading&&!downloading&&!awaitingPermission);
+        save.setEnabled(work!=null&&!reading&&!downloading&&!awaitingPermission);cancel.setVisibility(reading||downloading?View.VISIBLE:View.GONE);
+        boolean saved=work!=null&&SavedWorks.contains(this,work);
+        save.setText(downloading?"保存中，请稍候…":saved?"已保存 · 再次保存":"保存到手机");
+        if(saved&&!downloading){receipt.setText("已保存\n"+SavedWorks.summary(this,work));receipt.setVisibility(View.VISIBLE);}
         interactive(content,!downloading);
+    }
+    void setBrowserExpanded(boolean expanded) {
+        browserExpanded=expanded;
+        if(browser.getParent()!=null)((ViewGroup)browser.getParent()).removeView(browser);
+        browser.setAlpha(expanded?1f:0f);browser.setFocusable(expanded);browser.setFocusableInTouchMode(expanded);
+        browser.setImportantForAccessibility(expanded?View.IMPORTANT_FOR_ACCESSIBILITY_AUTO:View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        if(expanded)browserPanel.addView(browser,new LinearLayout.LayoutParams(-1,dp(330)));
+        else browserEngine.addView(browser,new FrameLayout.LayoutParams(-1,-1));
+        browserPanel.setVisibility(expanded?View.VISIBLE:View.GONE);
+        browserToggle.setText(expanded?"隐藏网页":"需要登录或验证？查看网页");
     }
     private void interactive(View view,boolean enabled){if(view instanceof Button||view instanceof ImageView)view.setEnabled(enabled);if(view instanceof ViewGroup)for(int i=0;i<((ViewGroup)view).getChildCount();i++)interactive(((ViewGroup)view).getChildAt(i),enabled);}
     private TextView text(String value,int size){TextView text=new TextView(this);text.setText(value);text.setTextSize(size);text.setTextColor(Color.rgb(40,50,65));text.setPadding(0,dp(6),0,dp(6));return text;}
@@ -169,5 +213,5 @@ public final class MainActivity extends Activity {
     @Override protected void onStart(){super.onStart();DownloadService.observe(observer);}
     @Override protected void onStop(){DownloadService.unobserve(observer);super.onStop();}
     @Override protected void onSaveInstanceState(Bundle out){out.putString("text",input.getText().toString());super.onSaveInstanceState(out);}
-    @Override protected void onDestroy(){resolver.destroy();if(previewTask!=null)previewTask.cancel(true);previews.shutdownNow();main.removeCallbacksAndMessages(null);browser.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){resolver.destroy();if(previewTask!=null)previewTask.cancel(true);previews.shutdownNow();main.removeCallbacksAndMessages(null);if(completionDialog!=null)completionDialog.dismiss();if(repeatDialog!=null)repeatDialog.dismiss();browser.destroy();super.onDestroy();}
 }

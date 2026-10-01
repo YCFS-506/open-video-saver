@@ -14,8 +14,9 @@ public final class DownloadService extends Service {
     static final String CANCEL="com.ycfs.openvideosaver.CANCEL";
     interface Observer { void changed(State state); }
     static final class State {
-        final boolean busy;final String message;final int percent;final List<Uri> saved;
-        State(boolean busy,String message,int percent,List<Uri> saved){this.busy=busy;this.message=message;this.percent=percent;this.saved=saved;}
+        final boolean busy;final String message;final int percent;final List<Uri> saved;final long completion;
+        State(boolean busy,String message,int percent,List<Uri> saved){this(busy,message,percent,saved,0);}
+        State(boolean busy,String message,int percent,List<Uri> saved,long completion){this.busy=busy;this.message=message;this.percent=percent;this.saved=saved;this.completion=completion;}
     }
     private static final CopyOnWriteArrayList<Observer> observers=new CopyOnWriteArrayList<>();
     private static volatile State state=new State(false,"",-1,null);
@@ -23,8 +24,8 @@ public final class DownloadService extends Service {
     private final Handler main=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private Future<?> task;private volatile Thread activeThread;private long lastUpdate;private volatile boolean cancelling;
-    static synchronized boolean enqueue(android.content.Context context,Work work,Work.Format format) {
-        if(state.busy)return false;
+    static synchronized boolean enqueue(android.content.Context context,Work work,Work.Format format,boolean repeatApproved) {
+        if(state.busy||(!repeatApproved&&SavedWorks.contains(context,work)))return false;
         Work snapshot=new Work(work.platform,work.source);snapshot.id=work.id;snapshot.caption=work.caption;snapshot.author=work.author;snapshot.referer=work.referer;
         for(Work.Picture p:work.pictures){Work.Picture copy=new Work.Picture(p.url);copy.selected=p.selected;copy.cached=p.cached;copy.mime=p.mime;snapshot.pictures.add(copy);}
         pending=snapshot;choice=format;state=new State(true,"准备保存",-1,null);
@@ -42,7 +43,7 @@ public final class DownloadService extends Service {
         Work work;Work.Format format;
         synchronized(DownloadService.class){work=pending;format=choice;pending=null;choice=null;}
         if(work==null){complete("没有等待保存的作品",null);return START_NOT_STICKY;}
-        startForeground(1,notification("正在保存作品",-1,true));
+        cancelling=false;lastUpdate=0;startForeground(1,notification("正在保存作品",-1,true));
         task=worker.submit(()->{
             activeThread=Thread.currentThread();if(cancelling)activeThread.interrupt();
             try {
@@ -51,14 +52,16 @@ public final class DownloadService extends Service {
                     int percent=total>0?(int)Math.min(100,done*100/total):-1;
                     main.post(()->{if(!cancelling){publish(new State(true,phase,percent,null));getSystemService(NotificationManager.class).notify(1,notification(phase,percent,true));}});
                 });
-                main.post(()->complete("保存完成：视频在 Movies，图片在 Pictures，文案在 Download / OpenVideoSaver",saved));
+                String summary=SavedWorks.describe(work);SavedWorks.record(this,work,summary);
+                main.post(()->complete(summary,saved));
             }catch(Exception error){main.post(()->complete(cancelling?"已取消保存":"保存失败："+(error.getMessage()==null?error.getClass().getSimpleName():error.getMessage()),null));}
             finally{activeThread=null;}
         });return START_NOT_STICKY;
     }
     private void publish(State value){state=value;for(Observer observer:observers)observer.changed(value);}
     private void complete(String text,List<Uri> saved) {
-        publish(new State(false,text,-1,saved));stopForeground(STOP_FOREGROUND_REMOVE);
+        task=null;
+        publish(new State(false,text,-1,saved,saved==null?0:System.currentTimeMillis()));stopForeground(STOP_FOREGROUND_REMOVE);
         getSystemService(NotificationManager.class).notify(2,notification(text,-1,false));stopSelf();
     }
     private Notification notification(String text,int percent,boolean running) {

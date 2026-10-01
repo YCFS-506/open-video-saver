@@ -1,6 +1,7 @@
 package com.ycfs.openvideosaver;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
@@ -13,11 +14,16 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.TextView;
+import android.webkit.WebView;
 import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Test;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.Assert.*;
 
 public class DeviceSmokeTest {
@@ -82,6 +88,66 @@ public class DeviceSmokeTest {
             }
             assertEquals("原创测试文案",new String(read(context.getContentResolver().openInputStream(result.get(2))),java.nio.charset.StandardCharsets.UTF_8));
         }finally{for(Uri uri:result)context.getContentResolver().delete(uri,null,null);MediaFiles.clean(cache);}
+    }
+    @Test public void browserRemainsLaidOutButHiddenUntilExplicitlyExpanded() {
+        Instrumentation instrument=InstrumentationRegistry.getInstrumentation();Context context=instrument.getTargetContext();
+        MainActivity activity=(MainActivity)instrument.startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try {
+            instrument.waitForIdleSync();instrument.runOnMainSync(()->{
+                WebView browser=field(activity,"browser");Button toggle=field(activity,"browserToggle");
+                assertEquals(0f,browser.getAlpha(),0f);assertTrue(browser.getWidth()>0);assertTrue(browser.getHeight()>0);
+                assertEquals(View.GONE,toggle.getVisibility());assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,browser.getImportantForAccessibility());
+                activity.setBrowserExpanded(true);assertEquals(1f,browser.getAlpha(),0f);
+                assertSame(field(activity,"browserPanel"),browser.getParent());
+                toggle.performClick();assertEquals(0f,browser.getAlpha(),0f);assertSame(field(activity,"browserEngine"),browser.getParent());
+            });
+        }finally{instrument.runOnMainSync(activity::finish);}
+    }
+    @Test public void successfulSavePromptsOnceAndRequiresConfirmationBeforeRepeating() throws Exception {
+        Instrumentation instrument=InstrumentationRegistry.getInstrumentation();Context context=instrument.getTargetContext();
+        MainActivity activity=(MainActivity)instrument.startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        File cache=new MediaFiles(context).cache();Work work=new Work("douyin","https://www.douyin.com/note/test");
+        work.id="receipt-test-"+UUID.randomUUID();work.caption="保存成功提示测试";
+        Work.Picture picture=new Work.Picture("https://p3.douyinpic.com/test");picture.mime="image/png";picture.cached=new File(cache,"original.png");work.pictures.add(picture);
+        Bitmap image=Bitmap.createBitmap(12,12,Bitmap.Config.ARGB_8888);image.eraseColor(Color.GREEN);
+        try(OutputStream output=new FileOutputStream(picture.cached)){image.compress(Bitmap.CompressFormat.PNG,100,output);}image.recycle();
+        AtomicReference<DownloadService.State> completed=new AtomicReference<>();CountDownLatch latch=new CountDownLatch(1);
+        DownloadService.Observer observer=value->{if(value.saved!=null){completed.set(value);latch.countDown();}};
+        try {
+            instrument.runOnMainSync(()->{
+                setField(activity,"work",work);assertTrue(DownloadService.enqueue(activity,work,null,false));DownloadService.observe(observer);
+            });
+            assertTrue("actual save must finish",latch.await(20,TimeUnit.SECONDS));instrument.waitForIdleSync();
+            assertEquals(3,completed.get().saved.size());assertTrue(SavedWorks.contains(context,work));
+            instrument.runOnMainSync(()->{
+                AlertDialog dialog=field(activity,"completionDialog");assertNotNull(dialog);assertTrue(dialog.isShowing());
+                assertTrue(dialogText(dialog).contains("保存成功"));assertTrue(dialogText(dialog).contains("1 张图片"));
+                Button save=field(activity,"save");assertTrue(save.isEnabled());assertEquals("已保存 · 再次保存",save.getText().toString());
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick();
+            });
+            instrument.waitForIdleSync();instrument.runOnMainSync(()->{
+                activity.onDownloadState(completed.get());AlertDialog old=field(activity,"completionDialog");assertFalse(old.isShowing());
+                Button save=field(activity,"save");save.performClick();AlertDialog repeat=field(activity,"repeatDialog");assertTrue(repeat.isShowing());
+                assertTrue(dialogText(repeat).contains("这条作品已保存过"));repeat.getButton(AlertDialog.BUTTON_NEGATIVE).performClick();
+                assertFalse("backend also rejects an unconfirmed repeat",DownloadService.enqueue(activity,work,null,false));
+            });
+        }finally {
+            DownloadService.unobserve(observer);instrument.runOnMainSync(activity::finish);
+            if(completed.get()!=null)for(Uri uri:completed.get().saved)context.getContentResolver().delete(uri,null,null);
+            context.getSharedPreferences("saved_works",0).edit().remove(SavedWorks.key(work)).commit();MediaFiles.clean(cache);
+        }
+    }
+    @SuppressWarnings("unchecked") private static <T> T field(Object object,String name) {
+        try{java.lang.reflect.Field field=object.getClass().getDeclaredField(name);field.setAccessible(true);return (T)field.get(object);}
+        catch(ReflectiveOperationException e){throw new AssertionError(e);}
+    }
+    private static void setField(Object object,String name,Object value) {
+        try{java.lang.reflect.Field field=object.getClass().getDeclaredField(name);field.setAccessible(true);field.set(object,value);}
+        catch(ReflectiveOperationException e){throw new AssertionError(e);}
+    }
+    private static String dialogText(AlertDialog dialog) {
+        List<View> views=new ArrayList<>();flatten(dialog.getWindow().getDecorView(),views);StringBuilder text=new StringBuilder();
+        for(View view:views)if(view instanceof TextView)text.append(((TextView)view).getText()).append('\n');return text.toString();
     }
     @Test public void dashMuxPreservesVideoFramesAndBothTracks() throws Exception {
         Instrumentation instrument=InstrumentationRegistry.getInstrumentation();Context context=instrument.getTargetContext();MediaFiles files=new MediaFiles(context);File cache=files.cache();

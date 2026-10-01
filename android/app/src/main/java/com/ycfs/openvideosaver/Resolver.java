@@ -19,7 +19,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 final class Resolver {
-    interface Callback { void ready(Work work); void error(String message); }
+    interface Callback { void ready(Work work); void error(String message); default void browserOpened(){} }
     private final Handler main=new Handler(Looper.getMainLooper());
     private final ExecutorService worker=Executors.newSingleThreadExecutor();
     private Future<?> job;
@@ -109,6 +109,7 @@ final class Resolver {
             if(done||generation!=requestGeneration)return;
             web.getSettings().setJavaScriptEnabled(true);
             web.getSettings().setDomStorageEnabled(true);
+            web.getSettings().setMediaPlaybackRequiresUserGesture(true);
             web.getSettings().setAllowFileAccess(false);
             web.getSettings().setAllowContentAccess(false);
             web.getSettings().setUserAgentString(platform.equals("kuaishou")?Net.MOBILE:Net.DESKTOP);
@@ -132,7 +133,7 @@ final class Resolver {
                 }
                 @Override public void onPageFinished(WebView view,String url) { if(!done&&generation==requestGeneration)poll(requestGeneration); }
             });
-            web.loadUrl(address);
+            callback.browserOpened();web.loadUrl(address);
             if(platform.equals("douyin")&&!address.contains("/note/"))main.postDelayed(()->{
                 if(!done&&generation==requestGeneration){attempts=0;openBrowser("https://www.douyin.com/note/"+id,requestGeneration);}
             },20000);

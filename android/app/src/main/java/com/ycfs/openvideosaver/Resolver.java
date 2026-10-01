@@ -176,7 +176,7 @@ final class Resolver {
             "if(p==='kuaishou'&&window.INIT_STATE)return JSON.stringify({kind:'ks',data:window.INIT_STATE});"+
             "if(p==='douyin'){var a=Array.from(document.querySelectorAll('img[src*=\"tplv-dy-aweme-images\"]')).map(x=>x.currentSrc||x.src);"+
             "var st=Array.from(document.querySelectorAll('span')).find(x=>x.textContent.startsWith('发布时间：'));var r=st&&st.parentElement&&st.parentElement.parentElement;"+
-            "var caption=r&&r.firstElementChild&&r.firstElementChild.innerText||document.querySelector('meta[name=description]')?.content||'';"+
+            "var meta=document.querySelector('meta[name=description]');var caption=r&&r.firstElementChild&&r.firstElementChild.innerText||meta&&meta.content||'';"+
             "if(a.length)return JSON.stringify({kind:'images',data:{images:a,caption:caption}});"+
             "var v=document.querySelector('video');if(v&&v.videoWidth)return JSON.stringify({kind:'fallback',data:{url:v.currentSrc||v.src,width:v.videoWidth,height:v.videoHeight,caption:caption}});}"+
             "}catch(e){}return null;})()";

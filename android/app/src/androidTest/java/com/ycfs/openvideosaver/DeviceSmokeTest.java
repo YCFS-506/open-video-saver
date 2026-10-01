@@ -138,7 +138,7 @@ public class DeviceSmokeTest {
                         @Override public void onPageCommitVisible(WebView view,String url){client.onPageCommitVisible(view,url);}
                         @Override public void onPageFinished(WebView view,String url){client.onPageFinished(view,url);}
                         @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request){
-                            if(request.getUrl().getPath().equals("/fixture-slow.png")) {
+                            if("/fixture-slow.png".equals(request.getUrl().getPath())) {
                                 imageRequested.countDown();return new WebResourceResponse("image/png",null,new InputStream(){
                                     final ByteArrayInputStream data=new ByteArrayInputStream(picture);boolean released;
                                     private void awaitImage() throws IOException {if(!released)try{if(!imageRelease.await(30,TimeUnit.SECONDS))throw new IOException("fixture timeout");released=true;}catch(InterruptedException e){Thread.currentThread().interrupt();throw new InterruptedIOException();}}

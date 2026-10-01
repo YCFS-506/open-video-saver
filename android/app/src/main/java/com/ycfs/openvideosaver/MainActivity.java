@@ -4,6 +4,8 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -14,23 +16,21 @@ import android.widget.*;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 
 public final class MainActivity extends Activity {
     private final Resolver resolver=new Resolver();
-    private final ExecutorService previews=Executors.newSingleThreadExecutor();
     private final Handler main=new Handler(Looper.getMainLooper());
-    private EditText input;private TextView status,count,receipt;
-    private Button read,save,cancel,browserToggle;private LinearLayout content,browserPanel;
+    private EditText input;private TextView status,count,receipt,captionText;
+    private Button read,save,cancel,browserToggle,copyCaption;private LinearLayout content,browserPanel,captionPanel;
+    private String caption="";private long readStarted;
     private FrameLayout browserEngine;
     private AlertDialog completionDialog,repeatDialog;
     private boolean browserExpanded,awaitingPermission,repeatApproved;
     private WebView browser;private ProgressBar progress;
     private Work work;private int selectedFormat;private boolean reading,downloading;
-    private File previewDirectory;private Future<?> previewTask;
+    private File previewDirectory;private ParallelPreview<Bitmap> previewBatch;
     private final List<CheckBox> checks=new ArrayList<>();
+    private final List<ImageView> pictureViews=new ArrayList<>();
     private final DownloadService.Observer observer=this::onDownloadState;
     void onDownloadState(DownloadService.State value) {
         downloading=value.busy;if(reading&&!value.busy)return;
@@ -60,6 +60,9 @@ public final class MainActivity extends Activity {
         input.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE);body.addView(input,new LinearLayout.LayoutParams(-1,-2));
         read=button("读取作品");body.addView(read);read.setOnClickListener(v->load());
         status=text("视频选择画质，图文勾选想保存的图片。",14);status.setTextIsSelectable(true);body.addView(status);
+        captionPanel=new LinearLayout(this);captionPanel.setOrientation(LinearLayout.VERTICAL);captionPanel.setVisibility(View.GONE);body.addView(captionPanel);
+        copyCaption=button("一键复制文案");copyCaption.setEnabled(false);captionPanel.addView(copyCaption);copyCaption.setOnClickListener(v->copyCaption());
+        captionText=text("",15);captionText.setTextIsSelectable(true);captionPanel.addView(captionText);
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setMax(100);progress.setVisibility(View.GONE);body.addView(progress,new LinearLayout.LayoutParams(-1,dp(12)));
         content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);body.addView(content);
         save=button("保存到手机");save.setEnabled(false);body.addView(save);save.setOnClickListener(v->save());
@@ -81,14 +84,16 @@ public final class MainActivity extends Activity {
     }
     private void load() {
         if(reading||downloading)return;
-        reading=true;work=null;selectedFormat=0;content.removeAllViews();checks.clear();MediaFiles.clean(previewDirectory);previewDirectory=null;
+        reading=true;readStarted=SystemClock.elapsedRealtime();work=null;selectedFormat=0;content.removeAllViews();checks.clear();pictureViews.clear();
+        if(previewBatch!=null)previewBatch.cancel();MediaFiles.clean(previewDirectory);previewDirectory=null;
+        showCaption("");captionPanel.setVisibility(View.GONE);
         status.setText("正在识别平台并读取公开作品…");progress.setIndeterminate(true);progress.setVisibility(View.VISIBLE);
         receipt.setVisibility(View.GONE);setBrowserExpanded(false);browserToggle.setVisibility(View.GONE);buttons();
         resolver.read(input.getText().toString(),browser,new Resolver.Callback(){
             @Override public void ready(Work result) {
-                work=result;setBrowserExpanded(false);browserToggle.setVisibility(View.GONE);
+                work=result;showCaption(result.caption);setBrowserExpanded(false);browserToggle.setVisibility(View.GONE);
                 if(result.isGallery())loadPictures(result);else {
-                    reading=false;progress.setVisibility(View.GONE);status.setText(result.platformName()+" · "+result.formats.size()+" 种可用画质");showVideo();buttons();
+                    reading=false;progress.setVisibility(View.GONE);status.setText(result.platformName()+" · "+result.formats.size()+" 种可用画质 · "+elapsed());showVideo();buttons();
                 }
             }
             @Override public void error(String message){reading=false;progress.setVisibility(View.GONE);status.setText(message);buttons();}
@@ -96,7 +101,7 @@ public final class MainActivity extends Activity {
         });
     }
     private void showVideo() {
-        content.addView(text(work.caption,16));RadioGroup group=new RadioGroup(this);content.addView(group);
+        RadioGroup group=new RadioGroup(this);content.addView(group);
         // Prefer a widely compatible source without changing its resolution or frame rate.
         int preferred=0;
         for(int i=0;i<work.formats.size();i++){Work.Format f=work.formats.get(i);if(f.codec.equals("H.264")){preferred=i;break;}}
@@ -109,30 +114,28 @@ public final class MainActivity extends Activity {
     }
     private void loadPictures(Work result) {
         status.setText(result.platformName()+" · 正在读取 "+result.pictures.size()+" 张图片预览及尺寸…");
-        previewTask=previews.submit(()->{
-            File directory=null;
-            try {
-                MediaFiles files=new MediaFiles(this);directory=files.cache();List<Bitmap> images=new ArrayList<>();
-                for(int i=0;i<result.pictures.size();i++) {
-                    Net.interrupted();images.add(files.preview(result.pictures.get(i),result.referer,directory,i+1));
-                    final int n=i+1;main.post(()->{if(reading)status.setText("已读取图片 "+n+" / "+result.pictures.size());});
-                }
-                Net.interrupted();File completed=directory;
-                main.post(()->{
-                    if(isDestroyed()||!reading||work!=result){MediaFiles.clean(completed);return;}
-                    previewDirectory=completed;reading=false;progress.setVisibility(View.GONE);
-                    status.setText(result.platformName()+" · 图文作品");showPictures(images);buttons();
-                });
-            }catch(Exception error) {
-                MediaFiles.clean(directory);main.post(()->{
-                    if(!reading||isDestroyed()||work!=result)return;reading=false;work=null;progress.setVisibility(View.GONE);
-                    status.setText("图片读取失败："+error.getMessage()+"。请重新读取作品。");buttons();
-                });
-            }
-        });
+        try {
+            MediaFiles files=new MediaFiles(this);File directory=files.cache();previewDirectory=directory;showPictures();
+            int[] completed={0};previewBatch=new ParallelPreview<>();
+            previewBatch.start(result.pictures.size(),i->files.preview(result.pictures.get(i),result.referer,directory,i+1),new ParallelPreview.Listener<Bitmap>() {
+                @Override public void loaded(int index,Bitmap bitmap){main.post(()->{
+                    if(isDestroyed()||!reading||work!=result){if(bitmap!=null)bitmap.recycle();return;}
+                    pictureViews.get(index).setImageBitmap(bitmap);checks.get(index).setText(pictureLabel(index));
+                    status.setText("已读取图片 "+(++completed[0])+" / "+result.pictures.size());
+                    if(completed[0]==result.pictures.size()) {
+                        reading=false;progress.setVisibility(View.GONE);status.setText(result.platformName()+" · 图文作品 · "+elapsed());buttons();
+                    }
+                });}
+                @Override public void failed(Exception error){main.post(()->{if(work==result&&!isDestroyed())pictureError(error);});}
+            });buttons();
+        }catch(Exception error){pictureError(error);}
     }
-    private void showPictures(List<Bitmap> bitmaps) {
-        content.addView(text(work.caption,15));count=text("",15);content.addView(count);
+    private void pictureError(Exception error) {
+        reading=false;work=null;progress.setVisibility(View.GONE);MediaFiles.clean(previewDirectory);previewDirectory=null;
+        status.setText("图片读取失败："+error.getMessage()+"。文案仍可复制；请重新读取作品后保存图片。");buttons();
+    }
+    private void showPictures() {
+        count=text("",15);content.addView(count);
         LinearLayout actions=new LinearLayout(this);Button all=button("全选"),none=button("全不选");
         actions.addView(all,new LinearLayout.LayoutParams(0,-2,1));actions.addView(none,new LinearLayout.LayoutParams(0,-2,1));content.addView(actions);
         all.setOnClickListener(v->{for(CheckBox check:checks)check.setChecked(true);});
@@ -142,13 +145,27 @@ public final class MainActivity extends Activity {
             if(i%2==0){row=new LinearLayout(this);content.addView(row);}
             LinearLayout cell=new LinearLayout(this);cell.setOrientation(LinearLayout.VERTICAL);cell.setPadding(dp(4),dp(8),dp(4),dp(4));
             row.addView(cell,new LinearLayout.LayoutParams(0,-2,1));
-            ImageView image=new ImageView(this);image.setScaleType(ImageView.ScaleType.FIT_CENTER);image.setImageBitmap(bitmaps.get(i));cell.addView(image,new LinearLayout.LayoutParams(-1,dp(165)));
-            Work.Picture picture=work.pictures.get(i);CheckBox check=new CheckBox(this);check.setText("第 "+(i+1)+" 张 · "+picture.width+"×"+picture.height);check.setTextSize(12);check.setChecked(true);
+            ImageView image=new ImageView(this);image.setScaleType(ImageView.ScaleType.FIT_CENTER);cell.addView(image,new LinearLayout.LayoutParams(-1,dp(165)));pictureViews.add(image);
+            Work.Picture picture=work.pictures.get(i);CheckBox check=new CheckBox(this);check.setText(pictureLabel(i));check.setTextSize(12);check.setChecked(true);
             check.setOnCheckedChangeListener((button,checked)->{picture.selected=checked;updateCount();});cell.addView(check);checks.add(check);
             image.setOnClickListener(v->check.setChecked(!check.isChecked()));
         }updateCount();
     }
     private void updateCount(){if(work==null)return;int n=0;for(Work.Picture picture:work.pictures)if(picture.selected)n++;count.setText("已选 "+n+" / "+work.pictures.size()+" 张");}
+    private String pictureLabel(int i){Work.Picture p=work.pictures.get(i);return "第 "+(i+1)+" 张 · "+(p.width>0?p.width+"×"+p.height:"正在读取…");}
+    private String elapsed(){return String.format(java.util.Locale.ROOT,"用时 %.1f 秒",(SystemClock.elapsedRealtime()-readStarted)/1000.0);}
+    void showCaption(String text) {
+        caption=text==null?"":text;boolean available=!caption.trim().isEmpty();
+        captionPanel.setVisibility(View.VISIBLE);captionText.setText(available?caption:"平台未返回可复制的文案");
+        copyCaption.setText("一键复制文案");copyCaption.setEnabled(available);
+    }
+    private void copyCaption() {
+        if(caption.trim().isEmpty())return;
+        getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("作品文案",caption));
+        copyCaption.setText("已复制文案");
+        if(Build.VERSION.SDK_INT<33)Toast.makeText(this,"文案已复制，可以粘贴到其他应用",Toast.LENGTH_SHORT).show();
+        main.postDelayed(()->copyCaption.setText("一键复制文案"),2000);
+    }
     private void save() {
         if(reading||downloading||awaitingPermission||work==null||(repeatDialog!=null&&repeatDialog.isShowing()))return;
         if(work.isGallery()){int n=0;for(Work.Picture p:work.pictures)if(p.selected)n++;if(n==0){status.setText("请至少选择一张图片");return;}}
@@ -185,7 +202,7 @@ public final class MainActivity extends Activity {
     }
     private void cancel() {
         if(downloading){startService(new Intent(this,DownloadService.class).setAction(DownloadService.CANCEL));return;}
-        resolver.cancel();browser.stopLoading();if(previewTask!=null)previewTask.cancel(true);
+        resolver.cancel();browser.stopLoading();if(previewBatch!=null)previewBatch.cancel();
         reading=false;work=null;setBrowserExpanded(false);browserToggle.setVisibility(View.GONE);progress.setVisibility(View.GONE);status.setText("已取消读取");buttons();
     }
     private void buttons() {
@@ -213,5 +230,5 @@ public final class MainActivity extends Activity {
     @Override protected void onStart(){super.onStart();DownloadService.observe(observer);}
     @Override protected void onStop(){DownloadService.unobserve(observer);super.onStop();}
     @Override protected void onSaveInstanceState(Bundle out){out.putString("text",input.getText().toString());super.onSaveInstanceState(out);}
-    @Override protected void onDestroy(){resolver.destroy();if(previewTask!=null)previewTask.cancel(true);previews.shutdownNow();main.removeCallbacksAndMessages(null);if(completionDialog!=null)completionDialog.dismiss();if(repeatDialog!=null)repeatDialog.dismiss();browser.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){resolver.destroy();if(previewBatch!=null)previewBatch.cancel();main.removeCallbacksAndMessages(null);if(completionDialog!=null)completionDialog.dismiss();if(repeatDialog!=null)repeatDialog.dismiss();browser.destroy();super.onDestroy();}
 }

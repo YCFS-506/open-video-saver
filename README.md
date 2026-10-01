@@ -30,10 +30,11 @@
 
 面向 **Android 8.0 及以上**、支持安装 APK 的鸿蒙设备，以及基于 Android 的小米 / Redmi 系统。不依赖 Google 服务，安装后无需配置 Python、Edge 或 FFmpeg。实际兼容性仍需对应设备测试；HarmonyOS NEXT 原生 HAP 不在此 APK 的目标范围内。
 
-- 下载入口：[v0.2.0-alpha.2 测试版](https://github.com/YCFS-506/open-video-saver/releases/tag/v0.2.0-alpha.2)。
+- 下载入口：[v0.2.0-alpha.3 测试版](https://github.com/YCFS-506/open-video-saver/releases/tag/v0.2.0-alpha.3)。
 - 粘贴分享文案，或从系统分享菜单选择“公开作品保存”。
 - 点击“读取作品”，选择视频格式，或点击图片 / 复选框选择要保存的图片。
 - 读取时默认隐藏平台网页；需要手动登录或验证时可点击“查看网页”。
+- 文案读取后可“一键复制文案”，保留正文、换行、话题与链接，无需先保存媒体；图文预览最多三张同时读取并逐张显示。
 - 点击“保存到手机”；下载进度显示在界面及通知中，可取消任务。完成后弹出“保存成功”，显示保存数量与位置；已保存作品再次保存需要确认。
 - 视频进入 `Movies/OpenVideoSaver`，图片进入 `Pictures/OpenVideoSaver`，文案及来源进入 `Download/OpenVideoSaver`。
 

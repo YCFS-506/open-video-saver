@@ -7,6 +7,11 @@ import java.util.Iterator;
 import java.util.Set;
 
 final class Parsers {
+    static String caption(String title,String description) {
+        title=title.trim();description=description.trim();
+        if(title.isEmpty())return description;if(description.isEmpty()||description.equals(title))return title;
+        return title+"\n\n"+description;
+    }
     static double frameRate(String value) {
         try{String[] parts=value.split("/",2);double rate=Double.parseDouble(parts[0]);if(parts.length==2)rate/=Double.parseDouble(parts[1]);return Double.isFinite(rate)&&rate>0?rate:0;}
         catch(NumberFormatException error){return 0;}
@@ -64,7 +69,7 @@ final class Parsers {
     }
     static Work xhs(JSONObject note,String source,String id) {
         Work work=new Work("xiaohongshu",source);work.id=id;work.referer="https://www.xiaohongshu.com/";
-        work.caption=note.optString("title")+"\n\n"+note.optString("desc");work.author=object(note,"user").optString("nickname");
+        work.caption=caption(note.optString("title"),note.optString("desc"));work.author=object(note,"user").optString("nickname");
         if(!note.optString("type").equals("video")) {
             JSONArray images=array(note,"imageList");
             for(int i=0;i<images.length();i++) {

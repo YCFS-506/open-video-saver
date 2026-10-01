@@ -5,6 +5,11 @@ import org.junit.Test;
 import static org.junit.Assert.*;
 
 public class LinksParserTest {
+    @Test public void captionIncludesDescriptionAndPreservesParagraphs() {
+        assertEquals("视频标题\n\n第一段🙂\n第二段 #知识 https://example.org",Parsers.caption("视频标题","第一段🙂\n第二段 #知识 https://example.org"));
+        assertEquals("只有正文",Parsers.caption("","只有正文"));assertEquals("标题",Parsers.caption("标题",""));
+        assertEquals("标题",Parsers.caption("标题","标题"));assertEquals("",Parsers.caption(" ","\n"));
+    }
     @Test public void groupedAdtsAudioIsSplitIntoRawAacFrames() throws Exception {
         byte[] data={(byte)255,(byte)241,76,(byte)128,1,63,(byte)252,11,22,(byte)255,(byte)241,76,(byte)128,1,63,(byte)252,33,44};
         java.util.List<Adts.Frame> frames=Adts.split(java.nio.ByteBuffer.wrap(data),data.length);

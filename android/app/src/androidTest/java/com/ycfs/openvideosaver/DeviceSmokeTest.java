@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.app.Instrumentation;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ClipboardManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.media.MediaExtractor;
@@ -16,6 +17,9 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import androidx.test.platform.app.InstrumentationRegistry;
 import org.junit.Test;
 import java.io.*;
@@ -102,6 +106,62 @@ public class DeviceSmokeTest {
                 toggle.performClick();assertEquals(0f,browser.getAlpha(),0f);assertSame(field(activity,"browserEngine"),browser.getParent());
             });
         }finally{instrument.runOnMainSync(activity::finish);}
+    }
+    @Test public void captionCanBeCopiedInFullBeforeMediaIsSaved() {
+        Instrumentation instrument=InstrumentationRegistry.getInstrumentation();Context context=instrument.getTargetContext();
+        MainActivity activity=(MainActivity)instrument.startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        StringBuilder text=new StringBuilder("作品标题\n\n");for(int i=0;i<80;i++)text.append("第 ").append(i).append(" 段：有用的资料🙂 #知识 https://example.org/info\n");String expected=text.toString();
+        try {
+            instrument.runOnMainSync(()->{
+                setField(activity,"reading",true);activity.showCaption(expected);
+                Button copy=field(activity,"copyCaption"),save=field(activity,"save");assertTrue(copy.isEnabled());assertFalse(save.isEnabled());copy.performClick();
+                ClipboardManager clipboard=activity.getSystemService(ClipboardManager.class);assertNotNull(clipboard.getPrimaryClip());
+                assertEquals(expected,clipboard.getPrimaryClip().getItemAt(0).getText().toString());assertEquals("已复制文案",copy.getText().toString());
+                activity.showCaption("\n ");assertFalse(copy.isEnabled());copy.performClick();
+                assertEquals("empty caption must not replace copied text",expected,clipboard.getPrimaryClip().getItemAt(0).getText().toString());
+            });
+        }finally{instrument.runOnMainSync(activity::finish);}
+    }
+    @Test public void hiddenBrowserReadsReadyDataWithoutWaitingForSlowPageImage() throws Exception {
+        Instrumentation instrument=InstrumentationRegistry.getInstrumentation();Context context=instrument.getTargetContext();
+        MainActivity activity=(MainActivity)instrument.startActivitySync(new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        CountDownLatch imageRelease=new CountDownLatch(1),imageRequested=new CountDownLatch(1),ready=new CountDownLatch(1);
+        AtomicReference<Work> result=new AtomicReference<>();AtomicReference<String> error=new AtomicReference<>();
+        AtomicReference<WebView> browser=new AtomicReference<>();Resolver resolver=new Resolver();
+        Bitmap png=Bitmap.createBitmap(12,12,Bitmap.Config.ARGB_8888);ByteArrayOutputStream bytes=new ByteArrayOutputStream();png.compress(Bitmap.CompressFormat.PNG,100,bytes);png.recycle();byte[] picture=bytes.toByteArray();
+        String html="<html><body><div style='height:300px'>已加载的作品</div><script>window.__INITIAL_STATE__={note:{noteDetailMap:{test:{note:{type:'normal',title:'标题',desc:'完整正文',imageList:[{urlDefault:'https://sns-webpic-qc.xhscdn.com/original.jpg'}]}}}}};</script><img width='12' height='12' src='https://www.xiaohongshu.com/fixture-slow.png'></body></html>";
+        try {
+            instrument.runOnMainSync(()->{
+                WebView web=new WebView(activity) {
+                    @Override public void loadUrl(String url){loadDataWithBaseURL(url,html,"text/html","UTF-8",null);}
+                    @Override public void setWebViewClient(WebViewClient client){super.setWebViewClient(new WebViewClient(){
+                        @Override public void onPageCommitVisible(WebView view,String url){client.onPageCommitVisible(view,url);}
+                        @Override public void onPageFinished(WebView view,String url){client.onPageFinished(view,url);}
+                        @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request){
+                            if(request.getUrl().getPath().equals("/fixture-slow.png")) {
+                                imageRequested.countDown();return new WebResourceResponse("image/png",null,new InputStream(){
+                                    final ByteArrayInputStream data=new ByteArrayInputStream(picture);boolean released;
+                                    private void awaitImage() throws IOException {if(!released)try{if(!imageRelease.await(30,TimeUnit.SECONDS))throw new IOException("fixture timeout");released=true;}catch(InterruptedException e){Thread.currentThread().interrupt();throw new InterruptedIOException();}}
+                                    @Override public int read() throws IOException {awaitImage();return data.read();}
+                                    @Override public int read(byte[] b,int offset,int length) throws IOException {awaitImage();return data.read(b,offset,length);}
+                                });
+                            }
+                            return client.shouldInterceptRequest(view,request);
+                        }
+                    });}
+                };
+                browser.set(web);web.setAlpha(0f);((ViewGroup)field(activity,"browserEngine")).addView(web,new ViewGroup.LayoutParams(-1,-1));
+                resolver.read("https://www.xiaohongshu.com/discovery/item/test",web,new Resolver.Callback(){
+                    public void ready(Work work){result.set(work);ready.countDown();}
+                    public void error(String message){error.set(message);ready.countDown();}
+                });
+            });
+            assertTrue("controlled page must request its delayed image",imageRequested.await(8,TimeUnit.SECONDS));
+            assertTrue("read data before the slow resource finishes",ready.await(8,TimeUnit.SECONDS));assertNull(error.get());assertNotNull(result.get());
+            assertEquals("标题\n\n完整正文",result.get().caption);assertEquals(1,result.get().pictures.size());assertEquals("slow resource is still blocked",1,imageRelease.getCount());
+        }finally {
+            imageRelease.countDown();instrument.runOnMainSync(()->{resolver.destroy();if(browser.get()!=null){((ViewGroup)browser.get().getParent()).removeView(browser.get());browser.get().destroy();}activity.finish();});
+        }
     }
     @Test public void successfulSavePromptsOnceAndRequiresConfirmationBeforeRepeating() throws Exception {
         Instrumentation instrument=InstrumentationRegistry.getInstrumentation();Context context=instrument.getTargetContext();

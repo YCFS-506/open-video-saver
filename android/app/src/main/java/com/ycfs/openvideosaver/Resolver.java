@@ -2,6 +2,7 @@ package com.ycfs.openvideosaver;
 
 import android.os.Handler;
 import android.os.Looper;
+import android.graphics.Bitmap;
 import android.webkit.CookieManager;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -31,6 +32,7 @@ final class Resolver {
     private volatile int generation;
     private int imageCount,stableImages;
     private int browserGeneration;private boolean pollingStarted;
+    private String documentAddress="";
 
     void read(String text,WebView browser,Callback callback) {
         cancel();final int requestGeneration=generation;done=false;attempts=0;imageCount=0;stableImages=0;this.web=browser;this.callback=callback;
@@ -112,7 +114,7 @@ final class Resolver {
     private void openBrowser(String address,int requestGeneration) {
         main.post(()->{
             if(done||generation!=requestGeneration)return;
-            final int pageGeneration=++browserGeneration;pollingStarted=false;attempts=0;imageCount=0;stableImages=0;
+            final int pageGeneration=++browserGeneration;pollingStarted=false;attempts=0;imageCount=0;stableImages=0;documentAddress=address;
             web.getSettings().setJavaScriptEnabled(true);
             web.getSettings().setDomStorageEnabled(true);
             web.getSettings().setMediaPlaybackRequiresUserGesture(true);
@@ -120,6 +122,10 @@ final class Resolver {
             web.getSettings().setAllowContentAccess(false);
             web.getSettings().setUserAgentString(platform.equals("kuaishou")?Net.MOBILE:Net.DESKTOP);
             web.setWebViewClient(new WebViewClient(){
+                @Override public void onPageStarted(WebView view,String url,Bitmap favicon){
+                    if(done||generation!=requestGeneration||browserGeneration!=pageGeneration)return;
+                    documentAddress=url;beginPolling(requestGeneration,pageGeneration);
+                }
                 @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request) {
                     if(done||generation!=requestGeneration)return null;
                     String uri=request.getUrl().toString();
@@ -153,7 +159,8 @@ final class Resolver {
     }
     private void poll(int requestGeneration,int pageGeneration) {
         if(done||generation!=requestGeneration||browserGeneration!=pageGeneration)return;
-        String script="(function(){try{var s=window.__INITIAL_STATE__,p="+JSONObject.quote(platform)+";"+
+        // Navigation may start while the old DOM is still alive. Only read the current document.
+        String script="(function(){try{if(location.href!==new URL("+JSONObject.quote(documentAddress)+").href)return null;var s=window.__INITIAL_STATE__,p="+JSONObject.quote(platform)+";"+
             "if(p==='xiaohongshu'&&s&&s.note){var m=s.note.noteDetailMap||{};for(var k in m)if(m[k].note)return JSON.stringify({kind:'xhs',id:k,data:m[k].note});}"+
             "if(p==='bilibili'&&s&&s.detail)return JSON.stringify({kind:'opus',data:s.detail});"+
             "if(p==='kuaishou'&&window.INIT_STATE)return JSON.stringify({kind:'ks',data:window.INIT_STATE});"+

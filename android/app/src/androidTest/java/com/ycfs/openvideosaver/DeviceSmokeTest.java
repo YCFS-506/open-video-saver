@@ -135,6 +135,7 @@ public class DeviceSmokeTest {
                 WebView web=new WebView(activity) {
                     @Override public void loadUrl(String url){loadDataWithBaseURL(url,html,"text/html","UTF-8",null);}
                     @Override public void setWebViewClient(WebViewClient client){super.setWebViewClient(new WebViewClient(){
+                        @Override public void onPageStarted(WebView view,String url,Bitmap favicon){client.onPageStarted(view,url,favicon);}
                         @Override public void onPageCommitVisible(WebView view,String url){client.onPageCommitVisible(view,url);}
                         @Override public void onPageFinished(WebView view,String url){client.onPageFinished(view,url);}
                         @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request){
